@@ -31,7 +31,7 @@ function createBot() {
     host: HOST,
     port: PORT,
     username: USERNAME,
-    version: "26.1.2", // ← set your actual Minecraft version
+    version: "1.21.4", // ← set your actual Minecraft version
     skipValidation: true,  // skip ping before connecting
     auth: "offline",
     hideErrors: false,
