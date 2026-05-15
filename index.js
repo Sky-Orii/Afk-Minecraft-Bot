@@ -2,40 +2,66 @@ const mineflayer = require("mineflayer");
 const express = require("express");
 
 // ─── CONFIG ────────────────────────────────────────────────────────────────
-const HOST = "Alpheus0.aternos.me"; // ← Your Aternos address
+const HOST = "Alpheus0.aternos.me";
 const PORT = 44710;
 const USERNAME = "AFKBot";
-const MIN_RECONNECT_MS = 15000;   // Wait at least 15s before reconnecting
-const MAX_RECONNECT_MS = 60000;   // Cap at 1 minute max wait
+const MIN_RECONNECT_MS = 15000;
+const MAX_RECONNECT_MS = 60000;
 // ───────────────────────────────────────────────────────────────────────────
 
-// Keep-alive web server
+// Shared bot state — dashboard reads from this
+const state = {
+  status: "Connecting",
+  connectedAt: null,
+  reconnects: 0,
+  lastKickReason: null,
+  startedAt: Date.now(),
+};
+
 const app = express();
-app.get("/", (req, res) => res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>AFK Bot Dashboard</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:sans-serif;background:#0f1117;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh}.card{background:#1a1d27;border:1px solid #2a2d3a;border-radius:12px;padding:2rem;width:420px}.header{display:flex;align-items:center;gap:12px;margin-bottom:1.5rem}.dot{width:10px;height:10px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}.title{font-size:18px;font-weight:600}.sub{font-size:13px;color:#888;margin-top:2px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:1.5rem}.metric{background:#12141c;border-radius:8px;padding:.875rem}.mlabel{font-size:11px;color:#666;margin-bottom:4px}.mval{font-size:20px;font-weight:600}.row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #2a2d3a;font-size:13px}.row:last-child{border-bottom:none}.badge{background:#14532d;color:#22c55e;border-radius:99px;padding:2px 10px;font-size:12px}</style></head><body><div class="card"><div class="header"><div class="dot"></div><div><div class="title">AFK Bot</div><div class="sub">Alpheus0.aternos.me:44710</div></div><span class="badge" style="margin-left:auto">Online</span></div><div class="grid"><div class="metric"><div class="mlabel">Uptime</div><div class="mval" id="up">0:00:00</div></div><div class="metric"><div class="mlabel">Version</div><div class="mval" style="font-size:15px;padding-top:4px">1.21.4</div></div><div class="metric"><div class="mlabel">Username</div><div class="mval" style="font-size:15px;padding-top:4px">AFKBot</div></div><div class="metric"><div class="mlabel">Auth</div><div class="mval" style="font-size:15px;padding-top:4px">Offline</div></div></div><div class="row"><span style="color:#888">Server</span><span>PaperMC 1.21.4</span></div><div class="row"><span style="color:#888">Movement</span><span class="badge">Active</span></div><div class="row"><span style="color:#888">Web server</span><span class="badge">Running</span></div></div><script>const s=Date.now();setInterval(()=>{const e=Math.floor((Date.now()-s)/1000);const h=Math.floor(e/3600);const m=Math.floor((e%3600)/60);const sec=e%60;document.getElementById("up").textContent=h+":"+String(m).padStart(2,"0")+":"+String(sec).padStart(2,"0")},1000);</script></body></html>`));
+app.get("/", (req, res) => {
+  const uptimeMs = Date.now() - state.startedAt;
+  const s = Math.floor(uptimeMs / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const uptime = h + ":" + String(m).padStart(2,"0") + ":" + String(sec).padStart(2,"0");
+
+  const sessionMs = state.connectedAt ? Date.now() - state.connectedAt : 0;
+  const ss = Math.floor(sessionMs / 1000);
+  const sh = Math.floor(ss / 3600);
+  const sm = Math.floor((ss % 3600) / 60);
+  const ssec = ss % 60;
+  const session = state.connectedAt
+    ? sh + ":" + String(sm).padStart(2,"0") + ":" + String(ssec).padStart(2,"0")
+    : "—";
+
+  const isOnline = state.status === "Connected";
+  const dotColor = isOnline ? "#22c55e" : "#f59e0b";
+  const badgeStyle = isOnline
+    ? "background:#14532d;color:#22c55e"
+    : "background:#451a03;color:#f59e0b";
+
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta http-equiv="refresh" content="10"><title>AFK Bot Dashboard</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:sans-serif;background:#0f1117;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh}.card{background:#1a1d27;border:1px solid #2a2d3a;border-radius:12px;padding:2rem;width:420px}.header{display:flex;align-items:center;gap:12px;margin-bottom:1.5rem}.dot{width:10px;height:10px;border-radius:50%;animation:pulse 2s infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}.title{font-size:18px;font-weight:600}.sub{font-size:13px;color:#888;margin-top:2px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:1.5rem}.metric{background:#12141c;border-radius:8px;padding:.875rem}.mlabel{font-size:11px;color:#666;margin-bottom:4px}.mval{font-size:20px;font-weight:600}.row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #2a2d3a;font-size:13px}.row:last-child{border-bottom:none}.badge{border-radius:99px;padding:2px 10px;font-size:12px}.refresh{font-size:11px;color:#444;text-align:center;margin-top:1rem}</style></head><body><div class="card"><div class="header"><div class="dot" style="background:${dotColor}"></div><div><div class="title">AFK Bot</div><div class="sub">${HOST}:${PORT}</div></div><span class="badge" style="${badgeStyle};margin-left:auto">${state.status}</span></div><div class="grid"><div class="metric"><div class="mlabel">Bot uptime</div><div class="mval" style="font-size:17px">${uptime}</div></div><div class="metric"><div class="mlabel">Session time</div><div class="mval" style="font-size:17px">${session}</div></div><div class="metric"><div class="mlabel">Reconnects</div><div class="mval">${state.reconnects}</div></div><div class="metric"><div class="mlabel">Version</div><div class="mval" style="font-size:15px;padding-top:4px">1.21.4</div></div></div><div class="row"><span style="color:#888">Username</span><span>${USERNAME}</span></div><div class="row"><span style="color:#888">Server</span><span>PaperMC 1.21.4</span></div><div class="row"><span style="color:#888">Movement</span><span class="badge" style="background:#14532d;color:#22c55e">${isOnline ? "Active" : "Idle"}</span></div>${state.lastKickReason ? `<div class="row"><span style="color:#888">Last kick</span><span style="color:#f87171;font-size:12px;max-width:200px;text-align:right">${state.lastKickReason}</span></div>` : ""}<div class="refresh">Auto-refreshes every 10s</div></div></body></html>`);
+});
 app.listen(process.env.PORT || 3000, () => console.log("Keep-alive server started"));
 
 let reconnectDelay = MIN_RECONNECT_MS;
 let reconnectTimeout = null;
-let isReconnecting = false; // ← prevents double reconnect
+let isReconnecting = false;
 
 function createBot() {
-  if (reconnectTimeout) {
-    clearTimeout(reconnectTimeout);
-    reconnectTimeout = null;
-  }
+  if (reconnectTimeout) { clearTimeout(reconnectTimeout); reconnectTimeout = null; }
   isReconnecting = false;
+  state.status = "Connecting";
 
   console.log(`[${new Date().toLocaleTimeString()}] Connecting to ${HOST}...`);
 
   const bot = mineflayer.createBot({
-    host: HOST,
-    port: PORT,
-    username: USERNAME,
-    version: "1.21.4", // ← set your actual Minecraft version
-    skipValidation: true,  // skip ping before connecting
-    auth: "offline",
-    hideErrors: false,
-    checkTimeoutInterval: 30000,
+    host: HOST, port: PORT, username: USERNAME,
+    version: "1.21.4", auth: "offline",
+    hideErrors: false, checkTimeoutInterval: 30000,
+    skipValidation: true,
   });
 
   let moveInterval = null;
@@ -45,44 +71,30 @@ function createBot() {
     const controls = ["forward", "back", "left", "right", "forward", "forward"];
     const move = controls[Math.floor(Math.random() * controls.length)];
     const duration = 500 + Math.random() * 2000;
-
     if (bot.entity) {
       bot.setControlState(move, true);
-
       if (Math.random() > 0.5) {
-        setTimeout(() => {
-          if (bot.entity) {
-            bot.setControlState("jump", true);
-            setTimeout(() => bot.setControlState("jump", false), 300);
-          }
-        }, Math.random() * duration);
+        setTimeout(() => { if (bot.entity) { bot.setControlState("jump", true); setTimeout(() => bot.setControlState("jump", false), 300); } }, Math.random() * duration);
       }
-
-      setTimeout(() => {
-        bot.setControlState(move, false);
-      }, duration);
+      setTimeout(() => bot.setControlState(move, false), duration);
     }
   }
 
   function randomLook() {
     if (!bot.entity) return;
-    const yaw = (Math.random() * 2 - 1) * Math.PI;
-    const pitch = (Math.random() - 0.5) * Math.PI / 2;
-    bot.look(yaw, pitch, true);
+    bot.look((Math.random() * 2 - 1) * Math.PI, (Math.random() - 0.5) * Math.PI / 2, true);
   }
 
   function cleanup() {
-    clearInterval(moveInterval);
-    clearInterval(lookInterval);
-    moveInterval = null;
-    lookInterval = null;
+    clearInterval(moveInterval); clearInterval(lookInterval);
+    moveInterval = null; lookInterval = null;
   }
 
   function scheduleReconnect(reason) {
-    // ← if already reconnecting, ignore duplicate events
     if (isReconnecting) return;
     isReconnecting = true;
-
+    state.status = "Reconnecting";
+    state.connectedAt = null;
     cleanup();
     console.log(`[${new Date().toLocaleTimeString()}] ⚠️  ${reason}`);
     console.log(`[${new Date().toLocaleTimeString()}] 🔄 Reconnecting in ${reconnectDelay / 1000}s...`);
@@ -99,6 +111,8 @@ function createBot() {
 
   bot.once("spawn", () => {
     console.log(`[${new Date().toLocaleTimeString()}] 🌍 Bot spawned, starting movement...`);
+    state.status = "Connected";
+    state.connectedAt = Date.now();
     moveInterval = setInterval(randomMove, 30000);
     lookInterval = setInterval(randomLook, 20000);
     setTimeout(randomMove, 3000);
@@ -108,16 +122,12 @@ function createBot() {
   bot.on("kicked", (reason) => {
     let parsed = reason;
     try {
-      if (typeof reason === "object") {
-        parsed = reason.text || reason.translate || JSON.stringify(reason);
-      } else {
-        parsed = JSON.parse(reason)?.text || reason;
-      }
+      if (typeof reason === "object") parsed = reason.text || reason.translate || JSON.stringify(reason);
+      else parsed = JSON.parse(reason)?.text || reason;
     } catch {}
     const parsedStr = String(parsed).toLowerCase();
-    if (parsedStr.includes("throttl")) {
-      reconnectDelay = MAX_RECONNECT_MS;
-    }
+    if (parsedStr.includes("throttl")) reconnectDelay = MAX_RECONNECT_MS;
+    state.lastKickReason = String(parsed).slice(0, 60);
     scheduleReconnect(`Kicked: ${parsed}`);
   });
 
@@ -126,9 +136,7 @@ function createBot() {
     scheduleReconnect(`Error: ${err.message}`);
   });
 
-  bot.on("end", () => {
-    scheduleReconnect("Bot disconnected.");
-  });
+  bot.on("end", () => scheduleReconnect("Bot disconnected."));
 }
 
 createBot();
